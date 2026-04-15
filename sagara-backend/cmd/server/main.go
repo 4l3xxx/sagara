@@ -15,8 +15,8 @@ func main() {
 	// Simple env var for DB connection
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:alex12345@localhost:5432/sagara_revamp?sslmode=disable"
-		log.Println("DATABASE_URL not set, trying to connect with password alex12345 to sagara_revamp")
+		dsn = "postgres://postgres.zdjoycjhelpizeutevhp:indomieseleraku@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres?sslmode=require"
+		log.Println("DATABASE_URL not set, connecting to Supabase database")
 
 	}
 

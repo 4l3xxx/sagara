@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func CreateConsultationHandler(db *sql.DB) http.HandlerFunc {
@@ -42,7 +43,6 @@ func CreateConsultationHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Failed to save request: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Konsultasi berhasil dikirim", "id": id})
@@ -98,14 +98,38 @@ func GetConsultationsHandler(db *sql.DB) http.HandlerFunc {
 
 		var results []map[string]interface{}
 		for rows.Next() {
-			var id int
-			var name, email, svc, msg, cat, status, notes string
-			var score float64
-			var urgent bool
+			var id string
+			var name, email, svc, msg string
+			var cat, status, notes sql.NullString
+			var score sql.NullFloat64
+			var urgent sql.NullBool
 			var createdAt time.Time
+
 			if err := rows.Scan(&id, &name, &email, &svc, &msg, &cat, &score, &urgent, &status, &notes, &createdAt); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				log.Printf("Error scanning row: %v", err)
+				continue // Skip problematic rows instead of failing entirely
+			}
+
+			// Handle NullStrings
+			finalCat := "General"
+			if cat.Valid && cat.String != "" {
+				finalCat = cat.String
+			}
+			finalStatus := "New"
+			if status.Valid && status.String != "" {
+				finalStatus = status.String
+			}
+			finalNotes := ""
+			if notes.Valid {
+				finalNotes = notes.String
+			}
+			finalScore := 0.0
+			if score.Valid {
+				finalScore = score.Float64
+			}
+			finalUrgent := false
+			if urgent.Valid {
+				finalUrgent = urgent.Bool
 			}
 
 			results = append(results, map[string]interface{}{
@@ -114,11 +138,11 @@ func GetConsultationsHandler(db *sql.DB) http.HandlerFunc {
 				"business_email": email,
 				"service_type":   svc,
 				"message":        msg,
-				"nlp_category":   cat,
-				"lead_score":     score,
-				"is_urgent":      urgent,
-				"status":         status,
-				"admin_notes":    notes,
+				"nlp_category":   finalCat,
+				"lead_score":     finalScore,
+				"is_urgent":      finalUrgent,
+				"status":         finalStatus,
+				"admin_notes":    finalNotes,
 				"created_at":     createdAt.Format(time.RFC3339),
 			})
 		}
@@ -131,13 +155,24 @@ func GetConsultationsHandler(db *sql.DB) http.HandlerFunc {
 // GetAdminStatsHandler mengambil ringkasan statistik untuk dashboard cards
 func GetAdminStatsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var total, corp, sme, urgent int
-		
+		var total, corp, sme, urgent, today int
+
 		db.QueryRow("SELECT COUNT(*) FROM consultation_requests").Scan(&total)
 		db.QueryRow("SELECT COUNT(*) FROM consultation_requests WHERE nlp_category = 'Corporate'").Scan(&corp)
 		db.QueryRow("SELECT COUNT(*) FROM consultation_requests WHERE nlp_category = 'SME'").Scan(&sme)
 		db.QueryRow("SELECT COUNT(*) FROM consultation_requests WHERE is_urgent = true").Scan(&urgent)
 
+		// Query untuk menghitung data yang masuk HARI INI saja
+		db.QueryRow("SELECT COUNT(*) FROM consultation_requests WHERE created_at >= CURRENT_DATE").Scan(&today)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total":     total,
+			"corporate": corp,
+			"sme":       sme,
+			"urgent":    urgent,
+			"today":     today,
+		})
 	}
 }
 
@@ -150,7 +185,7 @@ func UpdateConsultationStatusHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		var input struct {
-			ID    int    `json:"id"`
+			ID     int    `json:"id"`
 			Status string `json:"status"`
 			Notes  string `json:"notes"`
 		}
@@ -160,14 +195,47 @@ func UpdateConsultationStatusHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		_, err := db.Exec("UPDATE consultation_requests SET status = $1, admin_notes = $2 WHERE id = $3", 
+		_, err := db.Exec("UPDATE consultation_requests SET status = $1, admin_notes = $2 WHERE id = $3",
 			input.Status, input.Notes, input.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+	}
+}
+
+// DeleteConsultationHandler handles both single and bulk deletion
+func DeleteConsultationHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var input struct {
+			IDs []string `json:"ids"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if len(input.IDs) == 0 {
+			http.Error(w, "No IDs provided", http.StatusBadRequest)
+			return
+		}
+
+		// Delete using IN clause for bulk efficiency
+		query := "DELETE FROM consultation_requests WHERE id = ANY($1)"
+		_, err := db.Exec(query, pq.Array(input.IDs))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Status updated successfully"})
+		json.NewEncoder(w).Encode(map[string]string{"message": "Data deleted successfully"})
 	}
 }

@@ -38,6 +38,7 @@ func main() {
 
 	// Admin API - Get all consultation requests
 	mux.HandleFunc("/api/admin/consultations", handler.GetConsultationsHandler(database))
+	mux.HandleFunc("/api/admin/consultations/delete", handler.DeleteConsultationHandler(database))
 	mux.HandleFunc("/api/admin/consultations/status", handler.UpdateConsultationStatusHandler(database))
 	mux.HandleFunc("/api/admin/stats", handler.GetAdminStatsHandler(database))
 

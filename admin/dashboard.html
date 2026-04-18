@@ -238,6 +238,9 @@
                                 Prioritize urgent corporate leads.</p>
                         </div>
                         <div class="flex gap-3">
+                            <button id="bulkDeleteBtn" onclick="deleteSelectedLeads()" class="hidden px-6 py-3 rounded-xl bg-red-50 text-red-600 font-bold text-sm border-2 border-red-600/20 hover:bg-red-600 hover:text-white transition-all">
+                                🗑️ Delete Selected (<span id="selectedCount">0</span>)
+                            </button>
                             <button
                                 class="px-6 py-3 rounded-xl text-teal-600 font-semibold text-sm border-2 border-teal-600/20 hover:border-teal-600 transition-all">Export
                                 CSV</button>
@@ -248,12 +251,15 @@
                         <table class="w-full text-left border-collapse min-w-[1000px]">
                             <thead>
                                 <tr class="bg-slate-50 text-slate-500 font-semibold text-xs uppercase tracking-wider">
+                                    <th class="py-5 px-6 w-10">
+                                        <input type="checkbox" id="selectAllLeads" onchange="toggleAllLeads(this)" class="rounded text-teal-600 focus:ring-teal-500">
+                                    </th>
                                     <th class="py-5 px-6">Prospect Details</th>
                                     <th class="py-5 px-6">Institution</th>
                                     <th class="py-5 px-6">AI Category</th>
                                     <th class="py-5 px-6">Lead Score</th>
                                     <th class="py-5 px-6">Date</th>
-                                    <th class="py-5 px-6 text-right">Update Status</th>
+                                    <th class="py-5 px-6 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="consultationTableBody" class="text-sm divide-y divide-slate-100">
@@ -370,7 +376,7 @@
                 const data = await res.json();
 
                 document.getElementById('totalChats').textContent = data.total || 0;
-                document.getElementById('todayChats').textContent = data.urgent || 0;
+                document.getElementById('todayChats').textContent = data.today || 0;
                 document.getElementById('uptime').textContent = 'Online';
                 document.getElementById('apiStatus').textContent = '✅ Active';
 
@@ -422,6 +428,9 @@
                 container.innerHTML = data.map(item => `
                     <tr class="hover:bg-slate-50 transition-colors">
                         <td class="py-5 px-6">
+                            <input type="checkbox" value="${item.id}" onchange="updateSelectedCount()" class="lead-checkbox rounded text-teal-600 focus:ring-teal-500">
+                        </td>
+                        <td class="py-5 px-6">
                             <div class="font-semibold text-slate-900">${item.full_name}</div>
                             <div class="text-slate-500 text-xs">${item.business_email}</div>
                         </td>
@@ -438,13 +447,16 @@
                             </div>
                         </td>
                         <td class="py-5 px-6 text-slate-500 text-xs">${formatDate(item.created_at)}</td>
-                        <td class="py-5 px-6 text-right">
-                            <select onchange="updateLeadStatus(${item.id}, this.value)" class="text-xs border rounded p-1 bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+                        <td class="py-5 px-6 text-right flex items-center justify-end gap-3">
+                            <select onchange="updateLeadStatus('${item.id}', this.value)" class="text-[10px] border rounded p-1 bg-white focus:ring-2 focus:ring-teal-500 outline-none">
                                 <option value="New" ${item.status === 'New' ? 'selected' : ''}>🆕 New</option>
                                 <option value="Contacted" ${item.status === 'Contacted' ? 'selected' : ''}>📞 Contacted</option>
                                 <option value="Closed" ${item.status === 'Closed' ? 'selected' : ''}>✅ Closed</option>
                                 <option value="Failed" ${item.status === 'Failed' ? 'selected' : ''}>❌ Failed</option>
                             </select>
+                            <button onclick="deleteLead('${item.id}')" class="p-1.5 text-slate-400 hover:text-red-600 transition-colors" title="Delete">
+                                <span class="material-symbols-outlined text-lg">delete</span>
+                            </button>
                         </td>
                     </tr>
                 `).join('');
@@ -476,6 +488,63 @@
                 }
             } catch (err) {
                 showToast("Gagal update status", "error");
+            }
+        }
+
+        // ============================================
+        // DELETION FUNCTIONS
+        // ============================================
+        function toggleAllLeads(masterCheckbox) {
+            const checkboxes = document.querySelectorAll('.lead-checkbox');
+            checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const checkedCount = document.querySelectorAll('.lead-checkbox:checked').length;
+            const btn = document.getElementById('bulkDeleteBtn');
+            const countLabel = document.getElementById('selectedCount');
+            
+            if (checkedCount > 0) {
+                btn.classList.remove('hidden');
+                countLabel.textContent = checkedCount;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        async function deleteLead(id) {
+            if (!confirm('Apakah Anda yakin ingin menghapus data ini secara PERMANEN?')) return;
+            await performDelete([id]);
+        }
+
+        async function deleteSelectedLeads() {
+            const checkboxes = document.querySelectorAll('.lead-checkbox:checked');
+            const ids = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (!confirm(`Apakah Anda yakin ingin menghapus ${ids.length} data terpilih secara PERMANEN?`)) return;
+            await performDelete(ids);
+        }
+
+        async function performDelete(ids) {
+            try {
+                const res = await fetch('http://localhost:8080/api/admin/consultations/delete', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+
+                if (res.ok) {
+                    showToast(`${ids.length} data berhasil dihapus permanen`);
+                    document.getElementById('selectAllLeads').checked = false;
+                    loadConsultations();
+                    loadAnalytics(); // Update stats cards
+                } else {
+                    const error = await res.text();
+                    showToast("Gagal menghapus: " + error, "error");
+                }
+            } catch (err) {
+                showToast("Gagal terhubung ke server", "error");
             }
         }
 

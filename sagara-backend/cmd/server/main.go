@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,21 +36,17 @@ func main() {
 	// Consultation Handler
 	mux.HandleFunc("/api/consultation", handler.CreateConsultationHandler(database))
 
-	// Placeholder Handlers for other specified routes
-	mux.HandleFunc("/api/services", func(w http.ResponseWriter, r *http.Request) {
-		// Mock implementation
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Implement services logic here"})
-	})
+	// Admin API - Get all consultation requests
+	mux.HandleFunc("/api/admin/consultations", handler.GetConsultationsHandler(database))
+	mux.HandleFunc("/api/admin/consultations/status", handler.UpdateConsultationStatusHandler(database))
+	mux.HandleFunc("/api/admin/stats", handler.GetAdminStatsHandler(database))
 
+	// Portfolio & About Handlers
 	mux.HandleFunc("/api/portfolio", handler.GetPortfolioHandler(database))
-
 	mux.HandleFunc("/api/about", handler.GetAboutSectionHandler(database))
 
-	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Implement stats logic here"})
-	})
+	// Static File Server for Admin
+	mux.Handle("/admin/", http.StripPrefix("/admin/", http.FileServer(http.Dir("../admin"))))
 
 	port := os.Getenv("PORT")
 	if port == "" {
